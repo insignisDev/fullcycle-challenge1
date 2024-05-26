@@ -2,11 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
+
+type Response struct {
+	Bid float64 `json:"bid"`
+}
 
 func main() {
 	ctx := context.Background()
@@ -21,6 +27,19 @@ func main() {
 		panic(err)
 	}
 	defer resp.Body.Close()
-
+	out, err := os.Create("cotacao.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer out.Close()
+	var data Response
+	err = json.NewDecoder(resp.Body).Decode(&data)
+	if err != nil {
+		panic(err)
+	}
+	_, err = out.WriteString("Dólar: " + strconv.FormatFloat(data.Bid, 'f', -1, 64))
+	if err != nil {
+		panic(err)
+	}
 	io.Copy(os.Stdout, resp.Body)
 }
