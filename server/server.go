@@ -62,8 +62,10 @@ func main() {
 		case <-ctx.Done():
 			if ctx.Err() == context.DeadlineExceeded {
 				log.Println("Timeout fetching cotation from external API")
+				return
 			} else {
 				log.Println("Error fetching cotation:", ctx.Err())
+				return
 			}
 		default:
 			handler(w, r, db)
@@ -76,9 +78,8 @@ func main() {
 func handler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 	cotation, err := getCotation(db)
 	if err != nil {
-		log.Fatalln("timeout client request")
-		fmt.Fprintf(w, "{timeout}", "timeout")
-		// http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Println("Error fetching cotation:", err)
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
 	fmt.Fprintf(w, "{\"Bid\": %.2f}", parseFloat(cotation.Bid))
@@ -92,7 +93,7 @@ func parseFloat(val string) float64 {
 	return parseFloat
 }
 
-func saveCotation(db *gorm.DB, cotation Currency) {
+func saveCotation(db *gorm.DB, cotation Currency) error {
 	high, err := strconv.ParseFloat(cotation.High, 64)
 	if err != nil {
 		panic(err)
@@ -111,10 +112,16 @@ func saveCotation(db *gorm.DB, cotation Currency) {
 		CreateDate: cotation.CreateDate,
 	}
 	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, 0*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
 	defer cancel()
 	db.WithContext(ctx).Save(&currency)
-
+	select {
+	case <-ctx.Done():
+		log.Println("timeout database request")
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
 
 func getCotation(db *gorm.DB) (Currency, error) {
@@ -141,7 +148,11 @@ func getCotation(db *gorm.DB) (Currency, error) {
 			return Currency{}, err
 		}
 		cotation := result["USDBRL"]
-		saveCotation(db, cotation)
+		err = saveCotation(db, cotation)
+		if err != nil {
+			return Currency{}, err
+		}
+		log.Println("sucesso saving data in database")
 		return cotation, nil
 	}
 }
